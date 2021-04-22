@@ -27,6 +27,9 @@ public class PersonRepositoryTest {
 	@Autowired
 	EntityManager em;
 
+	/**
+	 * Get some test data into database.
+	 */
 	@BeforeEach
 	public void setup() {
 		Address a1 = addresses.save(Address.builder().id(0L).city("Dortmund").street("street1").build());
@@ -40,6 +43,11 @@ public class PersonRepositoryTest {
 		em.flush();
 	}
 
+	/**
+	 * This test shows that we need to use distinct when filtering, because
+	 * otherwise 1-M relations lead to duplicates when joining. Together with
+	 * distinct and sorting, the error occurs.
+	 */
 	@Test
 	public void duplicates() {
 		Specification<Person> spec = new Specification<Person>() {
@@ -55,6 +63,11 @@ public class PersonRepositoryTest {
 		assertEquals(2, result.size());
 	}
 
+	/**
+	 * This test shows the isolated problem when using distinct together with
+	 * sorting. No duplicates are provoked here, but the combination of order by and
+	 * distinct is enough to reproduce the error.
+	 */
 	@Test
 	public void crashes() {
 		Specification<Person> spec = new Specification<Person>() {
