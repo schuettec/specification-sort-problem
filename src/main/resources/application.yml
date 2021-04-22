@@ -1,0 +1,7 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/klaerfall_service?user=klaerfall_service&password=secret
+  jpa:
+    generate-ddl: true
+    hibernate:
+      ddl-auto: create
