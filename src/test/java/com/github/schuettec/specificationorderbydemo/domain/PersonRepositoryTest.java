@@ -11,9 +11,12 @@ import javax.persistence.criteria.CriteriaBuilder;
 import javax.persistence.criteria.CriteriaQuery;
 import javax.persistence.criteria.Fetch;
 import javax.persistence.criteria.Join;
+import javax.persistence.criteria.JoinType;
+import javax.persistence.criteria.ListJoin;
 import javax.persistence.criteria.Order;
 import javax.persistence.criteria.Predicate;
 import javax.persistence.criteria.Root;
+import javax.persistence.criteria.Subquery;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,23 +31,41 @@ import org.springframework.data.jpa.domain.Specification;
 @Slf4j
 public class PersonRepositoryTest {
   @Autowired
-  PersonRepository repo;
+  PersonRepository personRepository;
   @Autowired
-  AddressRepository addresses;
+  AddressRepository addressRepository;
   @Autowired
   EntityManager em;
 
   @BeforeEach
   public void setup() {
-    Address a1 = addresses.save(Address.builder().id(0L).city("Dortmund").street("street1").build());
-    Address a2 = addresses.save(Address.builder().id(1L).city("Dortmund").street("street2").build());
-    Address a3 = addresses.save(Address.builder().id(2L).city("Berlin").street("street3").build());
+    addressRepository.deleteAll();
+    personRepository.deleteAll();
 
-    repo.save(Person.builder().id(0L).name("Dieter0").address(a1).addresses(asList(a1, a2, a3)).build());
-    repo.save(Person.builder().id(1L).name("Dieter1").address(a2).addresses(asList(a1, a2, a3)).build());
-    repo.save(Person.builder().id(2L).name("Dieter2").address(a3).build());
+    Address a1 = addressRepository.save(Address.builder().id(1L).city("Dortmund").street("A Street").build());
+    Address a2 = addressRepository.save(Address.builder().id(2L).city("Dortmund").street("B Street").build());
+    Address a3 = addressRepository.save(Address.builder().id(3L).city("Dortmund").street("C Street").build());
+    Address a4 = addressRepository.save(Address.builder().id(4L).city("Witten").street("Z Street").build());
+
+    personRepository.save(Person.builder().id(1L).name("Dieter0").address(a1).addresses(asList(a2)).build());
+    personRepository.save(Person.builder().id(2L).name("Dieter1").address(a2).addresses(asList(a1, a2, a3)).build());
+    personRepository.save(Person.builder().id(3L).name("Dieter1.1").address(a2).addresses(asList(a2, a3)).build());
+    personRepository.save(Person.builder().id(4L).name("Dieter1.2").address(a2).addresses(asList(a3)).build());
+    personRepository.save(Person.builder().id(5L).name("Dieter2").address(a3).build());
+    personRepository.save(Person.builder().id(6L).name("Dieter3").addresses(asList(a1, a2, a3)).build());
+    personRepository.save(Person.builder().id(7L).name("Dieter4").build());
+    personRepository.save(Person.builder().id(8L).name("Dieter5").address(a4).build());
 
     em.flush();
+    em.clear();
+    log.info("EVERYTHING IS CLEAR BABY! LET'S GO!");
+  }
+
+  @Test
+  public void test() {
+    List<Person> personList = personRepository.findAll();
+    log.info("PRINT ALL! {}", personList.size());
+    personList.forEach(this::print);
   }
 
   @Test
@@ -58,7 +79,7 @@ public class PersonRepositoryTest {
             criteriaBuilder.equal(root.join("addresses").get("city"), "Dortmund"));
       }
     };
-    List<Person> result = repo.findAll(spec, Sort.by("address.city"));
+    List<Person> result = personRepository.findAll(spec, Sort.by("address.city"));
     assertEquals(2, result.size());
     result.forEach(this::print);
   }
@@ -74,7 +95,7 @@ public class PersonRepositoryTest {
             criteriaBuilder.equal(root.join("addresses").get("city"), "Dortmund"));
       }
     };
-    Page<Person> result = repo.findAll(spec, PageRequest.of(0, 50, Sort.by("address.city")));
+    Page<Person> result = personRepository.findAll(spec, PageRequest.of(0, 50, Sort.by("address.city")));
     assertEquals(2, result.getTotalElements());
     result.forEach(this::print);
   }
@@ -105,7 +126,7 @@ public class PersonRepositoryTest {
       }
     };
 
-    List<Person> result = repo.findAll(spec);
+    List<Person> result = personRepository.findAll(spec);
     assertEquals(2, result.size());
   }
 
@@ -115,18 +136,11 @@ public class PersonRepositoryTest {
 
       @Override
       public Predicate toPredicate(Root<Person> root, CriteriaQuery<?> query, CriteriaBuilder criteriaBuilder) {
-        query.distinct(true);
-
         List<Order> orderList = new ArrayList<>();
 
-        Fetch<Person, Address> fetch = root.fetch("address");
-        Join<Person, Address> join = (Join<Person, Address>) fetch;
+        Join<Person, Address> join = root.join("address");
 
-        Fetch<Person, Address> fetch2 = root.fetch("addresses");
-        Join<Person, Address> join2 = (Join<Person, Address>) fetch2;
-
-        orderList.add(criteriaBuilder.desc(join.get("city")));
-        orderList.add(criteriaBuilder.desc(join2.get("city")));
+        Join<Person, Address> join2 = root.join("addresses");
 
         query.orderBy(orderList);
 
@@ -135,7 +149,7 @@ public class PersonRepositoryTest {
       }
     };
 
-    Page<Person> result = repo.findAll(spec, PageRequest.of(0, 50));
+    Page<Person> result = personRepository.findAll(spec, PageRequest.of(1, 1));
     assertEquals(2, result.getTotalElements());
     log.info("page: {}", result);
     result.forEach(this::print);
@@ -175,13 +189,92 @@ public class PersonRepositoryTest {
       }
     };
 
-    Page<Person> result = repo.findAll(spec, PageRequest.of(0, 1));
+    Page<Person> result = personRepository.findAll(spec, PageRequest.of(0, 1));
     assertEquals(2, result.getTotalElements());
     print(result);
     result.forEach(this::print);
 
-    result = repo.findAll(spec, PageRequest.of(1, 1));
+    result = personRepository.findAll(spec, PageRequest.of(1, 1));
     assertEquals(2, result.getTotalElements());
+    print(result);
+    result.forEach(this::print);
+  }
+
+  @Test
+  public void duplicatesPage_WithSubQuery() {
+    Specification<Person> spec = (root, query, criteriaBuilder) -> {
+      Subquery<Person> subQuery = query.subquery(Person.class);
+      Root<Person> subRoot = subQuery.from(Person.class);
+
+      // Fetch<Person, Address> fetch = root.fetch("addresses");
+      // Join<Person, Address> join = (Join<Person, Address>) fetch;
+      Join<Person, Address> joinAddress = subRoot.join("address", JoinType.LEFT);
+      ListJoin<Person, Address> joinAddresses = subRoot.joinList("addresses", JoinType.LEFT);
+
+      subQuery.select(subRoot);
+      subQuery.where(
+          criteriaBuilder.or(
+              criteriaBuilder.equal(joinAddress.get("city"), "Witten"),
+              criteriaBuilder.equal(joinAddresses.get("city"), "Dortmund")
+          ));
+
+      return root.in(subQuery);
+    };
+
+    Specification<Person> fetchSpec = (root, query, criteriaBuilder) -> {
+      if (Long.class != query.getResultType()) {
+        root.fetch("address", JoinType.LEFT);
+      }
+      return null;
+    };
+
+    Specification<Person> personSpec = Specification.where(spec).and(fetchSpec);
+
+    Page<Person> result = personRepository.findAll(personSpec, PageRequest.of(0, 1, Sort.by(Sort.Direction.ASC, "addresses.street")));
+    print(result);
+    result.forEach(this::print);
+
+    result = personRepository.findAll(personSpec, PageRequest.of(1, 1, Sort.by(Sort.Direction.ASC, "addresses.street")));
+    print(result);
+    result.forEach(this::print);
+
+    log.info("SIZE 10!!");
+    result = personRepository.findAll(personSpec, PageRequest.of(0, 10, Sort.by(Sort.Direction.ASC, "addresses.street")));
+    print(result);
+    result.forEach(this::print);
+  }
+
+  @Test
+  public void duplicatesPage_WithSubQuery_2() {
+    Specification<Person> spec = (root, query, criteriaBuilder) -> {
+      CriteriaQuery<Person> testCB = criteriaBuilder.createQuery(Person.class);
+      Root<Person> testRoot = testCB.from(Person.class);
+
+      // Fetch<Person, Address> fetch = root.fetch("addresses");
+      // Join<Person, Address> join = (Join<Person, Address>) fetch;
+      Join<Person, Address> join = testRoot.joinList("addresses", JoinType.LEFT);
+
+      testCB.orderBy(criteriaBuilder.desc(join.get("city")));
+
+      testCB.select(testRoot.get("id"));
+      testCB.where(
+          criteriaBuilder.and(
+              criteriaBuilder.equal(join.get("city"), "Dortmund")
+          ));
+
+      return root.in(testCB);
+    };
+
+    Page<Person> result = personRepository.findAll(spec, PageRequest.of(0, 1));
+    print(result);
+    result.forEach(this::print);
+
+    result = personRepository.findAll(spec, PageRequest.of(1, 1));
+    print(result);
+    result.forEach(this::print);
+
+    log.info("SIZE 10!!");
+    result = personRepository.findAll(spec, PageRequest.of(0, 10));
     print(result);
     result.forEach(this::print);
   }
@@ -197,7 +290,7 @@ public class PersonRepositoryTest {
       }
     };
 
-    Page<Person> result = repo.findAll(spec, PageRequest.of(0, 50, Sort.by("address.city")));
+    Page<Person> result = personRepository.findAll(spec, PageRequest.of(0, 50, Sort.by("address.city")));
     assertEquals(2, result.getTotalElements());
     log.info("page: {}", result);
     result.forEach(this::print);
@@ -216,7 +309,7 @@ public class PersonRepositoryTest {
       }
     };
 
-    Page<Person> result = repo.findAll(spec, PageRequest.of(0, 50, Sort.by("address.city")));
+    Page<Person> result = personRepository.findAll(spec, PageRequest.of(0, 50, Sort.by("address.city")));
     assertEquals(2, result.getTotalElements());
     log.info("page: {}", result);
     result.forEach(this::print);
@@ -235,7 +328,7 @@ public class PersonRepositoryTest {
       }
     };
 
-    Page<Person> result = repo.findAll(spec, PageRequest.of(0, 50));
+    Page<Person> result = personRepository.findAll(spec, PageRequest.of(0, 50));
     assertEquals(2, result.getTotalElements());
     log.info("page: {}", result);
     result.forEach(this::print);
@@ -251,7 +344,7 @@ public class PersonRepositoryTest {
         return criteriaBuilder.equal(root.join("address").get("city"), "Dortmund");
       }
     };
-    List<Person> result = repo.findAll(spec, Sort.by("address.city"));
+    List<Person> result = personRepository.findAll(spec, Sort.by("address.city"));
     assertEquals(2, result);
   }
 
